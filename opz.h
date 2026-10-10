@@ -6,6 +6,7 @@ typedef struct {
     uint32_t subcycle;
     uint32_t cycles;
     uint32_t fsm_cycles;
+    uint32_t fsm_cycles_l;
 
     uint8_t ic;
     uint8_t ic_sync;
@@ -23,6 +24,12 @@ typedef struct {
     uint8_t write_busy_cnt;
     uint8_t mode_address;
 
+    // Noise
+    uint32_t noise_lfsr;
+    uint32_t noise_timer;
+    uint8_t noise_update;
+    uint8_t noise_bit;
+    uint8_t noise_sync;
 
     // Register set
     uint8_t mode_test[8];
@@ -77,6 +84,10 @@ typedef struct {
     uint8_t reg_e;
     uint8_t reg_1c;
     uint8_t reg_1e;
+
+
+    uint8_t reg_kon[4];
+    uint32_t reg_counter;
 } opz_t;
 
 void OPZ_Clock(opz_t* chip, int32_t* output, uint8_t* sh1, uint8_t* sh2, uint8_t* so);

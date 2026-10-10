@@ -9,6 +9,61 @@ enum {
     eg_num_release = 3
 };
 
+static void OPZ_KeyOn(opz_t* chip) {
+    uint32_t b0, b1, b2, b3;
+
+    if (chip->reg_counter == chip->mode_kon_channel) {
+        b0 = (chip->reg_kon_operator[1] >> 0) & 1;
+        b1 = (chip->reg_kon_operator[1] >> 3) & 1;
+        b2 = (chip->reg_kon_operator[1] >> 1) & 1;
+        b3 = (chip->reg_kon_operator[1] >> 2) & 1;
+    } else {
+        b0 = chip->ic ? 0 : (chip->reg_kon[3] >> 7) & 1;
+        b1 = (chip->reg_kon[0] >> 7) & 1;
+        b2 = (chip->reg_kon[1] >> 7) & 1;
+        b3 = (chip->reg_kon[2] >> 7) & 1;
+    }
+
+    chip->reg_kon[0] = (chip->reg_kon[0] << 1) | b0;
+    chip->reg_kon[1] = (chip->reg_kon[1] << 1) | b1;
+    chip->reg_kon[2] = (chip->reg_kon[2] << 1) | b2;
+    chip->reg_kon[3] = (chip->reg_kon[3] << 1) | b3;
+}
+
+static void OPZ_Noise(opz_t *chip) {
+    uint8_t noise_step = chip->ic || chip->noise_update;
+    uint8_t bit = 0;
+    if (noise_step) {
+        if (!chip->ic) {
+            uint8_t rst = (chip->noise_lfsr & 0xffff) == 0 && chip->noise_bit == 0;
+            uint8_t xr = ((chip->noise_lfsr >> 13) & 1) ^ chip->noise_bit;
+            bit = rst | xr;
+        }
+        chip->noise_bit = (chip->noise_lfsr >> 15) & 1;
+    } else {
+        bit = chip->noise_lfsr & 1;
+    }
+    chip->noise_lfsr <<= 1;
+    chip->noise_lfsr |= bit;
+}
+
+static void OPZ_NoiseTimer(opz_t *chip) {
+    uint32_t timer = chip->noise_timer;
+    uint32_t of = chip->noise_timer == (chip->noise_freq ^ 31);
+
+    chip->noise_update = of;
+
+    if (chip->ic || (of && chip->noise_sync)) {
+        timer = 0;
+    } else if (chip->noise_sync) {
+        timer = (timer + 1) & 31;
+    }
+
+    chip->noise_timer = timer;
+
+    chip->noise_sync = chip->fsm_cycles == 14 || chip->fsm_cycles == 30;
+}
+
 static void OPZ_DoIO1(opz_t* chip) {
     chip->write_a_l = chip->write_a_trig;
     chip->write_d_l = chip->write_d_trig;
@@ -160,6 +215,12 @@ static void OPZ_DoRegWrite(opz_t* chip) {
     if (chip->write_a_en) {
         chip->mode_address = chip->write_data;
     }
+
+    if (chip->fsm_cycles_l == 30) {
+        chip->reg_counter = 0;
+    } else {
+        chip->reg_counter = (chip->reg_counter + 1) & 31;
+    }
 }
 
 static void OPZ_DoIC(opz_t* chip) {
@@ -191,10 +252,15 @@ void OPZ_Clock(opz_t* chip, int32_t* output, uint8_t* sh1, uint8_t* sh2, uint8_t
 
     } else {
 
+        OPZ_Noise(chip);
+        OPZ_NoiseTimer(chip);
+        OPZ_KeyOn(chip);
         OPZ_DoRegWrite(chip);
         OPZ_DoIO2(chip);
         OPZ_DoIC(chip);
 
+
+        chip->fsm_cycles_l = chip->fsm_cycles;
         if (chip->ic && (chip->fsm_ic_latch & 2) == 0) {
             chip->fsm_cycles = 0;
         } else {
